@@ -63,5 +63,9 @@ test {
     maxHeapSize = '1G'
 }
 
+jar {
+    from { configurations.compile.collect { it.isDirectory() ? it : zipTree(it) } }
+}
+
 // tasks to run by executing ./gradlew
 defaultTasks 'clean', 'build', 'check'
