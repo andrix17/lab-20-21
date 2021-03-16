@@ -18,11 +18,17 @@ public class Ex4AverageWordLength {
 
 	public static class Ex4Mapper extends Mapper<Object, Text, Text, IntWritable> {
 
-		private Text word = new Text(), firstLetter = new Text();
+		private Text firstLetter = new Text();
 		private IntWritable wordLength = new IntWritable();
 
 		public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
-			//TODO mapper code
+			StringTokenizer itr = new StringTokenizer(value.toString());
+			while (itr.hasMoreTokens()) {
+				String word = itr.nextToken();
+				firstLetter.set(word.substring(0, 1));
+				wordLength.set(word.length());
+				context.write(firstLetter,wordLength);
+			}
 		}
 	}
 
@@ -30,7 +36,12 @@ public class Ex4AverageWordLength {
 
 		public void reduce(Text key, Iterable<IntWritable> values, Context context)
 				throws IOException, InterruptedException {
-			//TODO reducer code
+			double count = 0, sum = 0;
+			for (IntWritable val : values) {
+				sum += val.get();
+				count++;
+			}
+			context.write(key, new DoubleWritable(sum / count));
 		}
 	}
 
