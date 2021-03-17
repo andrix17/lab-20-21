@@ -5,7 +5,7 @@ import org.apache.spark.SparkConf
 object ExampleWeather1 extends App {
 
   // Use username "cloudera" when working on the VM
-  val username = "egallinucci"
+  val username = "agiannini"
 
   // Function to parse weather records; returns key -value pairs in the form(month, temperature)
   def parseWeatherLine(line: String): (String, Double) = {
