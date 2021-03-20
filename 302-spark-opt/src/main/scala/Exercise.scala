@@ -273,9 +273,9 @@ object Exercise extends App {
    * @param sc SparkContext
    */
 
-    /* First Version
+    /* //First Version
 
-    //1,3/2 s
+    //1,2 s -> 1,4 s
   def exercise7(sc: SparkContext): Unit = {
     import org.apache.spark.HashPartitioner
     val p = new HashPartitioner(24)
@@ -307,18 +307,12 @@ object Exercise extends App {
 
     val bRddTT = sc.broadcast(rddJoinMT.collectAsMap())
 
-    // rddJoinMTR_KV ( (movieId,title,nTags,year), rating )
-    val rddJoinMTR_KV = rddRatings
-      .filter(x => bRddTT.value.get(x._1).isDefined)
-      .map(r => ((r._1,bRddTT.value.get(r._1), r._2), r._3))
-      .map({case(k,v) => ((k._1,k._2.get._1,k._2.get._2,k._3),v)})
-
-    // rddRatingPerMovie ( (movieId,title,nTags,year), avgRating ) - Calculate average rating by movie
-    val rddRatingPerMovie = rddJoinMTR_KV.aggregateByKey((0.0,0.0))((a,v)=>(a._1+v,a._2+1), (a1,a2)=>(a1._1+a2._1,a1._2+a2._2))
-
     // rddRatingPerMovie ( year, (title,nTags,avgRating) )
-    val rddRatingPerMovieByYear = rddRatingPerMovie
-      .map({case(k,v) => (k._4, (k._2,k._3,v._1/v._2))})
+    val rddRatingPerMovieByYear = rddRatings
+      .filter(x => bRddTT.value.get(x._1).isDefined)
+      .map(r => ((r._1,r._2),r._3))
+      .aggregateByKey((0.0,0.0))((a,v)=>(a._1+v,a._2+1), (a1,a2)=>(a1._1+a2._1,a1._2+a2._2))
+      .map({case(k,v) => (k._2,(bRddTT.value(k._1)._1,bRddTT.value(k._1)._2,v._1/v._2))})
 
     /* CORE PART (end) */
 
@@ -333,13 +327,13 @@ object Exercise extends App {
 
      */
 
-    /* Second Version
+    /* //Second Version
 
 
-  //1,2s
+  //1,2s -> 1,4s
   def exercise7(sc: SparkContext): Unit = {
     import org.apache.spark.HashPartitioner
-    val p = new HashPartitioner(12)
+    val p = new HashPartitioner(24)//24o12 non cambia
     val inputMoviesPath = "/bigdata/dataset/movielens/movies.csv"
     val inputRatingsPath = "/bigdata/dataset/movielens/ratings.csv"
     val inputTagsPath = "/bigdata/dataset/movielens/tags.csv"
@@ -391,7 +385,7 @@ object Exercise extends App {
 
      */
 
-  //1.1s
+  //1.1/2s -> 1.2/3s prima esec.
   def exercise7(sc: SparkContext): Unit = {
     //import org.apache.spark.HashPartitioner
     //val p = new HashPartitioner(24)
@@ -408,16 +402,12 @@ object Exercise extends App {
     val rddRatings = sc.textFile(inputRatingsPath).flatMap(MovieLensParser.parseRatingLine)
     val rddTags = sc.textFile(inputTagsPath).flatMap(MovieLensParser.parseTagLine)
 
-    // rddMoviesKV (movieId, title)
-    val rddMoviesKV = rddMovies
-      .map(m => (m._1, m._2))
-    val bRddTitle = sc.broadcast(rddMoviesKV.collectAsMap())
-
     // rddJoinMT (movieId, (title, nTags)) - Join movies with tags
-    val rddJoinMT = rddTags
+    val rddTagM = rddTags
       .map(t => (t._1, 1))
       .reduceByKey(_ + _)
-      .map({case (k,v) => (k,(bRddTitle.value(k),v))})
+    val rddJoinMT = rddMovies
+      .map(m => (m._1, m._2)).join(rddTagM)
       //.partitionBy(p) con o senza poco cambia (sembra meglio senza)
 
     // rddRatingPerMovie ( year, (title,nTags,avgRating) )
