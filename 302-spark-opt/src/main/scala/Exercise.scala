@@ -1,5 +1,3 @@
-import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.FileSystem
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
 
@@ -9,7 +7,7 @@ import org.apache.spark.sql.SparkSession
 object Exercise extends App {
 
   override def main(args: Array[String]): Unit = {
-    val sc = getSparkContext()
+    val sc = getSparkContext
 
     if(args.length >= 1){
       args(0) match {
@@ -28,7 +26,7 @@ object Exercise extends App {
    * Creates the SparkContent; comment/uncomment code depending on Spark's version!
    * @return
    */
-  def getSparkContext(): SparkContext = {
+  def getSparkContext: SparkContext = {
     // Spark 1
     // val conf = new SparkConf().setAppName("Exercise 302 - Spark1")
     // new SparkContext(conf)
@@ -50,30 +48,23 @@ object Exercise extends App {
    *   - coalesce() minimizes data shuffling by exploiting the existing partitioning
    * - Verify the execution plan of your RDDs with rdd.toDebugString (shell) or on the web UI
    *
-   * @param sc
+   * @param sc SparkContext
    */
   def exercise1(sc: SparkContext): Unit = {
     val rddWeather = sc.textFile("hdfs:/bigdata/dataset/weather-sample").map(WeatherData.extract)
 
+    val rddInt = rddWeather.filter(_.temperature<999).coalesce(8).map(x => (x.month, x.temperature)).cache()
+
     // Average temperature for every month
-    rddWeather
-      .filter(_.temperature<999)
-      .map(x => (x.month, x.temperature))
-      .aggregateByKey((0.0,0.0))((a,v)=>(a._1+v,a._2+1),(a1,a2)=>(a1._1+a2._1,a1._2+a2._2))
-      .map({case(k,v)=>(k,v._1/v._2)})
-      .collect()
+    rddInt.aggregateByKey((0.0,0.0))((a,v)=>(a._1+v,a._2+1),(a1,a2)=>(a1._1+a2._1,a1._2+a2._2)).map({case(k,v)=>(k,v._1/v._2)}).collect()
 
     // Maximum temperature for every month
-    rddWeather
-      .filter(_.temperature<999)
-      .map(x => (x.month, x.temperature))
-      .reduceByKey((x,y)=>{if(x<y) y else x})
-      .collect()
+    rddInt.reduceByKey((x,y)=>{if(x<y) y else x}).collect()
   }
 
   /**
    * Find the best option
-   * @param sc
+   * @param sc SparkContext
    */
   def exercise2(sc: SparkContext): Unit = {
     import org.apache.spark.HashPartitioner
@@ -81,7 +72,7 @@ object Exercise extends App {
 
     val rddStation = sc.textFile("hdfs:/bigdata/dataset/weather-info/stations.csv").map(StationData.extract)
 
-    val rddS1 = rddStation
+    /*val rddS1 = rddStation
       .keyBy(x => x.usaf + x.wban)
       .partitionBy(p)
       .cache()
@@ -100,8 +91,8 @@ object Exercise extends App {
       .keyBy(x => x.usaf + x.wban)
       .map({case (k,v) => (k,(v.country,v.elevation))})
       .partitionBy(p)
-      .cache()
-    val rddS5 = rddStation
+      .cache()*/
+    /*rddS5*/ rddStation
       .map(x => (x.usaf + x.wban, (x.country,x.elevation)))
       .partitionBy(p)
       .cache()
@@ -125,18 +116,33 @@ object Exercise extends App {
    *     they must have the same partitioner!
    * - Verify the execution plan of the join in the web UI
    *
-   * @param sc
+   * @param sc SparkContext
    */
   def exercise3(sc: SparkContext): Unit = {
+    import org.apache.spark.HashPartitioner
+    val p = new HashPartitioner(8)
     val rddWeather = sc.textFile("hdfs:/bigdata/dataset/weather-sample").map(WeatherData.extract)
     val rddStation = sc.textFile("hdfs:/bigdata/dataset/weather-info/stations.csv").map(StationData.extract)
 
-    // TODO exercise
+    val rddW = rddWeather.filter(_.temperature<999)
+      .keyBy(x=> x.usaf + x.wban)
+      .partitionBy(p)
+
+    val rddSt = rddStation
+      .keyBy(x=> x.usaf + x.wban)
+      .partitionBy(p)
+
+    val rddJoin = rddW.join(rddSt).cache()
+
+    rddJoin.map({case(_,v) => (v._2.name, v._1.temperature)}).reduceByKey((x, y)=>{if(x<y) y else x}).collect()
+    val rddUK = rddJoin.filter(x=> x._2._2.country=="UK").map({case(_,v) => (v._2.name, v._1.temperature)}).reduceByKey((x, y)=>{if(x<y) y else x})
+    rddUK.collect()
+    rddUK.map({case(k,v)=> (v,k)}).sortByKey(ascending = false).collect()
   }
 
   /**
    * Use Spark's web UI to verify the space occupied by the following RDDs
-   * @param sc
+   * @param sc SparkContext
    */
   def exercise4(sc: SparkContext): Unit = {
     import org.apache.spark.storage.StorageLevel._
@@ -144,7 +150,7 @@ object Exercise extends App {
 
     sc.getPersistentRDDs.foreach(_._2.unpersist())
 
-    val memRdd = rddWeather.sample(false,0.1).repartition(8).cache()
+    val memRdd = rddWeather.sample(withReplacement = false,0.1).repartition(8).cache()
     val memSerRdd = memRdd.map(x=>x).persist(MEMORY_ONLY_SER)
     val diskRdd = memRdd.map(x=>x).persist(DISK_ONLY)
 
@@ -163,7 +169,7 @@ object Exercise extends App {
    * - Simply join the two RDDs
    * - Enforce on rddW1 the same partitioner of rddS (and then join)
    * - Exploit broadcast variables
-   * @param sc
+   * @param sc SparkContext
    */
   def exercise5(sc: SparkContext): Unit = {
     import org.apache.spark.HashPartitioner
@@ -184,6 +190,7 @@ object Exercise extends App {
     rddW.collect
     rddS.collect
 
+    /*
     // Is it better to simply join the two RDDs..
     rddW
       .join(rddS)
@@ -198,13 +205,14 @@ object Exercise extends App {
       .map({case(k,v)=>(v._2.name,v._1.temperature)})
       .reduceByKey((x,y)=>{if(x<y) y else x})
       .collect()
+     */
 
     // ..or to exploit broadcast variables?
     val bRddS = sc.broadcast(rddS.collectAsMap())
     val rddJ = rddW
       .map({case (k,v) => (bRddS.value.get(k),v)})
-      .filter(_._1!=None)
-      .map({case(k,v)=>(k.get.asInstanceOf[StationData],v)})
+      .filter(_._1.isDefined)
+      .map({case(k,v)=>(k.get,v)})
     rddJ
       .map({case (k,v) => (k.name,v.temperature)})
       .reduceByKey((x,y)=>{if(x<y) y else x})
@@ -213,7 +221,7 @@ object Exercise extends App {
 
   /**
    * Start from the result of Exercise 3; is there a more efficient way to compute the same result?
-   * @param sc
+   * @param sc SparkContext
    */
   def exercise6(sc: SparkContext): Unit = {
     val rddWeather = sc.textFile("hdfs:/bigdata/dataset/weather-sample").map(WeatherData.extract)
@@ -222,13 +230,13 @@ object Exercise extends App {
     val rddW = rddWeather.filter(_.temperature<999).keyBy(x => x.usaf + x.wban).cache()
     val rddS = rddStation.keyBy(x => x.usaf + x.wban).cache()
 
-    val rdd6a = rddW
-      .join(rddS)
-      .filter(_._2._2.country=="UK")
-      .map({case(k,v)=>(v._2.name,v._1.temperature)})
+    rddW
+      .reduceByKey((x,y)=>{if(x.temperature < y.temperature) y else x})
+      .join(rddS.filter(_._2.country=="UK"))
+      .map({case(_,v)=>(v._2.name,v._1.temperature)})
       .reduceByKey((x,y)=>{if(x<y) y else x})
       .map({case(k,v)=>(v,k)})
-      .sortByKey(false).collect()
+      .sortByKey(ascending = false).collect()
   }
 
 
@@ -262,13 +270,19 @@ object Exercise extends App {
    * - --num-executors 2
    * - --executor-cores 3
    *
-   * @param sc
+   * @param sc SparkContext
    */
+
+    /* First Version
+
+    //1,3/2 s
   def exercise7(sc: SparkContext): Unit = {
+    import org.apache.spark.HashPartitioner
+    val p = new HashPartitioner(24)
     val inputMoviesPath = "/bigdata/dataset/movielens/movies.csv"
     val inputRatingsPath = "/bigdata/dataset/movielens/ratings.csv"
     val inputTagsPath = "/bigdata/dataset/movielens/tags.csv"
-    val outputPath = "movielens-output"
+    val outputPath = "/user/agiannini/movielens-output"
     val topN = 10
 
     /* CORE PART (start) */
@@ -278,34 +292,87 @@ object Exercise extends App {
     val rddRatings = sc.textFile(inputRatingsPath).flatMap(MovieLensParser.parseRatingLine)
     val rddTags = sc.textFile(inputTagsPath).flatMap(MovieLensParser.parseTagLine)
 
-    // rddRatingsKV (movieId, (year, rating))
-    val rddRatingsKV = rddRatings
-      .map(r => ((r._1), (r._2, r._3)))
+    // rddMoviesKV (movieId, title)
+    val rddMoviesKV = rddMovies
+      .map(m => (m._1, m._2))
+    val bRddTitle = sc.broadcast(rddMoviesKV.collectAsMap())
+
+    // rddJoinMT (movieId, (title, nTags)) - Join movies with tags
+    val rddJoinMT = rddTags
+      .map(t => (t._1, 1))
+      .reduceByKey(_ + _)
+      .map({case (k,v) => (k,(bRddTitle.value.get(k),v))})
+      .filter(_._2._1.isDefined)
+      .map({case (k,v) => (k,(v._1.get,v._2))})
+
+    val bRddTT = sc.broadcast(rddJoinMT.collectAsMap())
+
+    // rddJoinMTR_KV ( (movieId,title,nTags,year), rating )
+    val rddJoinMTR_KV = rddRatings
+      .filter(x => bRddTT.value.get(x._1).isDefined)
+      .map(r => ((r._1,bRddTT.value.get(r._1), r._2), r._3))
+      .map({case(k,v) => ((k._1,k._2.get._1,k._2.get._2,k._3),v)})
+
+    // rddRatingPerMovie ( (movieId,title,nTags,year), avgRating ) - Calculate average rating by movie
+    val rddRatingPerMovie = rddJoinMTR_KV.aggregateByKey((0.0,0.0))((a,v)=>(a._1+v,a._2+1), (a1,a2)=>(a1._1+a2._1,a1._2+a2._2))
+
+    // rddRatingPerMovie ( year, (title,nTags,avgRating) )
+    val rddRatingPerMovieByYear = rddRatingPerMovie
+      .map({case(k,v) => (k._4, (k._2,k._3,v._1/v._2))})
+
+    /* CORE PART (end) */
+
+    // rddRatingPerMovie ( year, (title,nTags,avgRating) ) - Group by year and format the final result
+    rddRatingPerMovieByYear
+      .groupByKey
+      .mapValues(_.toList.sortBy(-_._3).take(topN))
+      .coalesce(1)
+      .sortByKey()
+      .saveAsTextFile(outputPath)
+  }
+
+     */
+
+    /* Second Version
+
+
+  //1,2s
+  def exercise7(sc: SparkContext): Unit = {
+    import org.apache.spark.HashPartitioner
+    val p = new HashPartitioner(12)
+    val inputMoviesPath = "/bigdata/dataset/movielens/movies.csv"
+    val inputRatingsPath = "/bigdata/dataset/movielens/ratings.csv"
+    val inputTagsPath = "/bigdata/dataset/movielens/tags.csv"
+    val outputPath = "/user/agiannini/movielens-output"
+    val topN = 10
+
+    /* CORE PART (start) */
+
+    // Initialize RDDs from CSV files
+    val rddMovies = sc.textFile(inputMoviesPath).flatMap(MovieLensParser.parseMovieLine)
+    val rddRatings = sc.textFile(inputRatingsPath).flatMap(MovieLensParser.parseRatingLine)
+    val rddTags = sc.textFile(inputTagsPath).flatMap(MovieLensParser.parseTagLine)
 
     // rddMoviesKV (movieId, title)
     val rddMoviesKV = rddMovies
       .map(m => (m._1, m._2))
-
-    // rddTagsPerMovie (movieId, nTags) - Count tags by movie
-    val rddTagsPerMovie = rddTags
-      .map(t => (t._1, 1))
-      .reduceByKey(_ + _)
+    val bRddTitle = sc.broadcast(rddMoviesKV.collectAsMap())
 
     // rddJoinMT (movieId, (title, nTags)) - Join movies with tags
-    val rddJoinMT = rddMoviesKV
-      .join(rddTagsPerMovie)
-
-    // rddJoinMTR (movieId, ( (title, nTags), (year,rating) )) - Join the result with ratings
-    val rddJoinMTR = rddJoinMT
-      .join(rddRatingsKV)
+    val rddJoinMT = rddTags
+      .map(t => (t._1, 1))
+      .reduceByKey(_ + _)
+      .map({case (k,v) => (k,(bRddTitle.value(k),v))})
+      .partitionBy(p)
 
     // rddJoinMTR_KV ( (movieId,title,nTags,year), rating )
-    val rddJoinMTR_KV = rddJoinMTR
-      .map({case (k,v) => ((k,v._1._1,v._1._2,v._2._1),v._2._2)})
+    val rddJoinMTR_KV = rddRatings
+      .map(r => (r._1,(r._2,r._3)))
+      .join(rddJoinMT)
+      .map({case(k,v) => ((k,v._2._1,v._2._2,v._1._1),v._1._2)})
 
     // rddRatingPerMovie ( (movieId,title,nTags,year), avgRating ) - Calculate average rating by movie
-    val rddRatingPerMovie = rddJoinMTR_KV
-      .aggregateByKey((0.0,0.0))((a,v)=>(a._1+v,a._2+1), (a1,a2)=>(a1._1+a2._1,a1._2+a2._2))
+    val rddRatingPerMovie = rddJoinMTR_KV.aggregateByKey((0.0,0.0))((a,v)=>(a._1+v,a._2+1), (a1,a2)=>(a1._1+a2._1,a1._2+a2._2))
 
     // rddRatingPerMovie ( year, (title,nTags,avgRating) )
     val rddRatingPerMovieByYear = rddRatingPerMovie
@@ -315,6 +382,55 @@ object Exercise extends App {
 
     // rddRatingPerMovie ( year, (title,nTags,avgRating) ) - Group by year and format the final result
     val result = rddRatingPerMovieByYear
+      .groupByKey
+      .mapValues(_.toList.sortBy(-_._3).take(topN))
+      .coalesce(1)
+      .sortByKey()
+      .saveAsTextFile(outputPath)
+  }
+
+     */
+
+  //1.1s
+  def exercise7(sc: SparkContext): Unit = {
+    //import org.apache.spark.HashPartitioner
+    //val p = new HashPartitioner(24)
+    val inputMoviesPath = "/bigdata/dataset/movielens/movies.csv"
+    val inputRatingsPath = "/bigdata/dataset/movielens/ratings.csv"
+    val inputTagsPath = "/bigdata/dataset/movielens/tags.csv"
+    val outputPath = "/user/agiannini/movielens-output"
+    val topN = 10
+
+    /* CORE PART (start) */
+
+    // Initialize RDDs from CSV files
+    val rddMovies = sc.textFile(inputMoviesPath).flatMap(MovieLensParser.parseMovieLine)
+    val rddRatings = sc.textFile(inputRatingsPath).flatMap(MovieLensParser.parseRatingLine)
+    val rddTags = sc.textFile(inputTagsPath).flatMap(MovieLensParser.parseTagLine)
+
+    // rddMoviesKV (movieId, title)
+    val rddMoviesKV = rddMovies
+      .map(m => (m._1, m._2))
+    val bRddTitle = sc.broadcast(rddMoviesKV.collectAsMap())
+
+    // rddJoinMT (movieId, (title, nTags)) - Join movies with tags
+    val rddJoinMT = rddTags
+      .map(t => (t._1, 1))
+      .reduceByKey(_ + _)
+      .map({case (k,v) => (k,(bRddTitle.value(k),v))})
+      //.partitionBy(p) con o senza poco cambia (sembra meglio senza)
+
+    // rddRatingPerMovie ( year, (title,nTags,avgRating) )
+    val rddRatingPerMovieByYear = rddRatings
+      .map(r => ((r._1,r._2),r._3))
+      .aggregateByKey((0.0,0.0))((a,v)=>(a._1+v,a._2+1), (a1,a2)=>(a1._1+a2._1,a1._2+a2._2))
+      .map({case(k,v) => (k._1, (k._2, v._1, v._2))})
+      .join(rddJoinMT).map({case(k,v) => (v._1._1,(k,v._2._1,v._2._2,v._1._2/v._1._3))})
+
+    /* CORE PART (end) */
+
+    // rddRatingPerMovie ( year, (title,nTags,avgRating) ) - Group by year and format the final result
+    rddRatingPerMovieByYear
       .groupByKey
       .mapValues(_.toList.sortBy(-_._3).take(topN))
       .coalesce(1)
